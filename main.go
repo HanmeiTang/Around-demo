@@ -1,10 +1,22 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
+	"reflect"
+	"strconv"
+
+	"github.com/olivere/elastic"
+)
+
+const (
+	POST_INDEX = "post"
+	DISTANCE   = "200km"
+
+	ES_URL = "http://10.128.0.2:9200"
 )
 
 type Location struct {
