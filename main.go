@@ -63,3 +63,68 @@ func handlerPost(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Fprintf(w, "Post received: %s\n", p.Message)
 }
+
+// Get query results from ES
+func readFromES(query elastic.Query, index string) (*elastic.SearchResult, error) {
+	client, err := elastic.NewClient(elastic.SetURL(ES_URL))
+	if err != nil {
+		return nil, err
+	}
+
+	searchResult, err := client.Search().
+		Index(index).
+		Query(query).
+		Pretty(true).
+		Do(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	return searchResult, nil
+}
+
+// Get complete query results
+// Convert query result to a list of json
+func getPostFromSearchResult(searchResult *elastic.SearchResult) []Post {
+	var ptype Post
+	var posts []Post
+
+	for _, item := range searchResult.Each(reflect.TypeOf(ptype)) {
+		p := item.(Post)
+		posts = append(posts, p)
+	}
+	return posts
+}
+
+func handlerSearch(w http.ResponseWriter, r *http.Request) {
+	fmt.Println("Received one request for search")
+
+	w.Header().Set("Content-Type", "application/json")
+
+	lat, _ := strconv.ParseFloat(r.URL.Query().Get("lat"), 64)
+	lon, _ := strconv.ParseFloat(r.URL.Query().Get("lon"), 64)
+	// range is optional
+	ran := DISTANCE
+	if val := r.URL.Query().Get("range"); val != "" {
+		ran = val + "km"
+	}
+	fmt.Println("range is ", ran)
+
+	query := elastic.NewGeoDistanceQuery("location")
+	query = query.Distance(ran).Lat(lat).Lon(lon)
+	searchResult, err := readFromES(query, POST_INDEX)
+	if err != nil {
+		http.Error(w, "Failed to read post from Elasticsearch", http.StatusInternalServerError)
+		fmt.Printf("Failed to read post from Elasticsearch %v.\n", err)
+		return
+	}
+	posts := getPostFromSearchResult(searchResult)
+
+	js, err := json.Marshal(posts)
+	if err != nil {
+		http.Error(w, "Failed to parse posts into JSON format", http.StatusInternalServerError)
+		fmt.Printf("Failed to parse posts into JSON format %v.\n", err)
+		return
+	}
+	w.Write(js)
+}
