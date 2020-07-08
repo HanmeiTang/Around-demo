@@ -7,11 +7,13 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strconv"
 
 	"cloud.google.com/go/storage"
 	"github.com/olivere/elastic"
+	"github.com/pborman/uuid"
 )
 
 const (
@@ -20,6 +22,20 @@ const (
 
 	ES_URL      = "http://10.128.0.2:9200"
 	BUCKET_NAME = "around-bucket-go-project"
+)
+
+var (
+	mediaTypes = map[string]string{
+		".jpeg": "image",
+		".jpg":  "image",
+		".gif":  "image",
+		".png":  "image",
+		".mov":  "video",
+		".mp4":  "video",
+		".avi":  "video",
+		".flv":  "video",
+		".wmv":  "video",
+	}
 )
 
 type Location struct {
@@ -167,4 +183,24 @@ func saveToGCS(r io.Reader, objectName string) (string, error) {
 
 	fmt.Printf("Image is saved to GCS: %s\n", attrs.MediaLink)
 	return attrs.MediaLink, nil
+}
+
+func saveToES(post *Post, index string, id string) error {
+	client, err := elastic.NewClient(elastic.SetURL(ES_URL))
+	if err != nil {
+		return err
+	}
+
+	_, err = client.Index().
+		Index(index).
+		Id(id).
+		BodyJson(post).
+		Do(context.Background())
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Post is saved to index: %s\n", post.Message)
+	return nil
 }
