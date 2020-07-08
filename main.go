@@ -74,14 +74,71 @@ func main() {
 // and p.Message = “this  is a message”
 func handlerPost(w http.ResponseWriter, r *http.Request) {
 	// Parse from body of request to get a json object.
+	// fmt.Println("Received one post request")
+	// decoder := json.NewDecoder(r.Body)
+	// var p Post
+	// if err := decoder.Decode(&p); err != nil {
+	// 	panic(err)
+	// }
+
+	// fmt.Fprintf(w, "Post received: %s\n", p.Message)
+
 	fmt.Println("Received one post request")
-	decoder := json.NewDecoder(r.Body)
-	var p Post
-	if err := decoder.Decode(&p); err != nil {
-		panic(err)
+	w.Header().Set("Content-Type", "application/json")
+
+	lat, _ := strconv.ParseFloat(r.FormValue("lat"), 64)
+	lon, _ := strconv.ParseFloat(r.FormValue("lon"), 64)
+
+	p := &Post{
+		User:    r.FormValue("user"),
+		Message: r.FormValue("message"),
+		Location: Location{
+			Lat: lat,
+			Lon: lon,
+		},
 	}
 
-	fmt.Fprintf(w, "Post received: %s\n", p.Message)
+	file, header, err := r.FormFile("image")
+	if err != nil {
+		http.Error(w, "Image is not available", http.StatusBadRequest)
+		fmt.Printf("Image is not available %v\n", err)
+		return
+	}
+
+	suffix := filepath.Ext(header.Filename)
+	if t, ok := mediaTypes[suffix]; ok {
+		p.Type = t
+	} else {
+		p.Type = "unknown"
+	}
+
+	id := uuid.New()
+	mediaLink, err := saveToGCS(file, id)
+	if err != nil {
+		http.Error(w, "Failed to save image to GCS", http.StatusInternalServerError)
+		fmt.Printf("Failed to save image to GCS %v\n", err)
+		return
+	}
+	p.Url = mediaLink
+
+	if p.Type == "image" {
+		uri := fmt.Sprintf("gs://%s/%s", BUCKET_NAME, id)
+		if score, err := annotate(uri); err != nil {
+			http.Error(w, "Failed to annotate image", http.StatusInternalServerError)
+			fmt.Printf("Failed to annotate the image %v\n", err)
+			return
+		} else {
+			p.Face = score
+		}
+	}
+
+	err = saveToES(p, POST_INDEX, id)
+	if err != nil {
+		http.Error(w, "Failed to save post to Elasticsearch", http.StatusInternalServerError)
+		fmt.Printf("Failed to save post to Elasticsearch %v\n", err)
+		return
+	}
+
 }
 
 // Get query results from ES
