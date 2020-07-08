@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"reflect"
 	"strconv"
 
+	"cloud.google.com/go/storage"
 	"github.com/olivere/elastic"
 )
 
@@ -16,7 +18,8 @@ const (
 	POST_INDEX = "post"
 	DISTANCE   = "200km"
 
-	ES_URL = "http://10.128.0.2:9200"
+	ES_URL      = "http://10.128.0.2:9200"
+	BUCKET_NAME = "around-bucket-go-project"
 )
 
 type Location struct {
@@ -38,6 +41,7 @@ type Post struct {
 func main() {
 	fmt.Println("started-service")
 	http.HandleFunc("/post", handlerPost)
+	http.HandleFunc("/search", handlerSearch)
 	// Fatal = print output and exit
 	log.Fatal(http.ListenAndServe(":8080", nil))
 
@@ -127,4 +131,40 @@ func handlerSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Write(js)
+}
+
+// save post images to GCS
+func saveToGCS(r io.Reader, objectName string) (string, error) {
+	ctx := context.Background()
+	client, err := storage.NewClient(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	bucket := client.Bucket(BUCKET_NAME)
+	if _, err := bucket.Attrs(ctx); err != nil {
+		return "", err
+	}
+
+	object := bucket.Object(objectName)
+	wc := object.NewWriter(ctx)
+	if _, err := io.Copy(wc, r); err != nil {
+		return "", err
+	}
+
+	if err := wc.Close(); err != nil {
+		return "", err
+	}
+
+	if err := object.ACL().Set(ctx, storage.AllUsers, storage.RoleReader); err != nil {
+		return "", err
+	}
+
+	attrs, err := object.Attrs(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	fmt.Printf("Image is saved to GCS: %s\n", attrs.MediaLink)
+	return attrs.MediaLink, nil
 }
